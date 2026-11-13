@@ -9,6 +9,7 @@ mod fetch;
 mod insertion;
 mod lang;
 mod ocr;
+mod scroll_debug;
 mod selected_text;
 mod tray;
 mod tts;

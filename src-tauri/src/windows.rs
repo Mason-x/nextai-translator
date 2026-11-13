@@ -395,7 +395,10 @@ pub fn checked_build<R: tauri::Runtime, M: tauri::Manager<R>>(
     builder: tauri::WebviewWindowBuilder<'_, R, M>,
 ) -> tauri::WebviewWindow<R> {
     match builder.build() {
-        Ok(window) => window,
+        Ok(window) => {
+            crate::scroll_debug::attach(&window);
+            window
+        }
         Err(e) => handle_webview_build_failure(&e),
     }
 }

@@ -70,7 +70,25 @@ has focus, Wayland or XWayland. `enigo` remains the fallback.
 window. Falls back to the `screenshots` crate when `grim` is missing, so the X11
 path still behaves exactly like upstream.
 
-### 6. Fork hygiene
+### 6. Wheel/touchpad scrolling fallback (`src/tauri/wheelScrollFallback.ts`)
+
+On this stack WebKitGTK delivers precise (touchpad / high-resolution wheel)
+scroll events to the page but never moves the scroll offset: the DOM receives
+`wheel` events (not `preventDefault`ed) and `scrollTop` stays put, while
+dragging the scrollbar and discrete wheel clicks both scroll normally.
+
+The fallback watches the first burst of wheel events that *should* have moved
+the page; if the offset has not changed 180 ms later it switches to manual
+scrolling for the session (with sub-pixel accumulation, because `scrollTop`
+reads back rounded and 0.1 px deltas would otherwise stall). On platforms where
+native scrolling works it never engages, so momentum/phases are untouched.
+
+`NEXTAI_SCROLL_DEBUG=1` prints every GDK scroll event (direction + deltas) to
+stderr and paints what the DOM received into a corner overlay;
+`NEXTAI_SCROLL_SELFTEST=1` additionally dispatches synthetic wheel events to
+prove the fallback engages.
+
+### 7. Fork hygiene
 
 * Updater endpoint points at this fork instead of upstream, so an official
   update can never overwrite these patches.
