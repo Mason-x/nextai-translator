@@ -229,9 +229,36 @@ fn focus_previous_window() -> Result<(), String> {
     }
 }
 
+/// Types text into the focused window. Returns `None` when no Wayland-native
+/// path is available so the caller can fall back to enigo.
+#[cfg(target_os = "linux")]
+fn type_text_on_wayland(text: &str) -> Option<Result<(), String>> {
+    if !crate::utils::is_wayland_session() {
+        return None;
+    }
+    // enigo's x11rb backend injects into the X11 focus; a Wayland-native window
+    // never sees those events. wtype goes through the virtual-keyboard protocol
+    // instead, which the compositor routes to whatever really has focus.
+    match std::process::Command::new("wtype")
+        .arg("--")
+        .arg(text)
+        .status()
+    {
+        Ok(status) if status.success() => Some(Ok(())),
+        Ok(status) => Some(Err(format!("wtype exited with {:?}", status))),
+        Err(_) => None,
+    }
+}
+
 fn replace_input_with_text(text: &str) -> Result<(), String> {
     if text.is_empty() {
         return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    if let Some(result) = type_text_on_wayland(text) {
+        thread::sleep(Duration::from_millis(80));
+        return result;
     }
 
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;

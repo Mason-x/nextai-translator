@@ -9,7 +9,6 @@ use active_win_pos_rs::get_active_window;
 use cocoa::appkit::NSWindow;
 use debug_print::debug_println;
 use enigo::*;
-use get_selected_text::get_selected_text;
 use mouse_position::mouse_position::Mouse;
 use serde_json::json;
 use std::sync::atomic::Ordering;
@@ -130,15 +129,7 @@ pub async fn show_translator_window_with_selected_text_command() {
         .as_ref()
         .and_then(|conf| conf.restore_previous_position)
         .unwrap_or(false);
-    let read_selected_text = || -> String {
-        match get_selected_text() {
-            Ok(text) => text,
-            Err(e) => {
-                eprintln!("Error getting selected text natively: {}", e);
-                String::new()
-            }
-        }
-    };
+    let read_selected_text = || -> String { crate::selected_text::get_selected_text() };
 
     let selected_text = read_selected_text();
 

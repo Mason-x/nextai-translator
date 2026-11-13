@@ -112,7 +112,9 @@ pub fn writing_command() {
         None => return,
     };
     let app_handle = APP_HANDLE.get().unwrap();
-    let _ = app_handle.track_event("writing", None);
+    if crate::telemetry_enabled() {
+        let _ = app_handle.track_event("writing", None);
+    }
 
     // Reset per-invocation state.
     *IS_FIRST_CHUNK.lock() = true;

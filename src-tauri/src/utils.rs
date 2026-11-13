@@ -17,6 +17,13 @@ use crate::APP_HANDLE;
 
 static SELECT_ALL: Mutex<()> = Mutex::new(());
 
+/// True when the app was started from a Wayland session. Screenshot capture and
+/// key/text injection all need a different implementation there: both the X11
+/// root window and the X11 focus are blind to Wayland-native clients.
+pub fn is_wayland_session() -> bool {
+    std::env::var_os("WAYLAND_DISPLAY").is_some()
+}
+
 #[allow(dead_code)]
 #[cfg(not(target_os = "macos"))]
 pub fn select_all(enigo: &mut Enigo) {

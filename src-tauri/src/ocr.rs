@@ -130,6 +130,31 @@ pub fn screenshot(x: i32, y: i32) {
     // Remove the previous capture so a failure below cannot leave it in
     // place to be silently reused (#1872).
     let _ = fs::remove_file(&image_file_path);
+
+    // The `screenshots` crate reads the X11 root window. Under XWayland that
+    // window contains nothing that Wayland-native clients drew, so OCR would
+    // crop a black image. grim asks the compositor for the real framebuffer.
+    #[cfg(target_os = "linux")]
+    if crate::utils::is_wayland_session() {
+        match std::process::Command::new("grim")
+            .arg(&image_file_path)
+            .stdout(std::process::Stdio::null())
+            .status()
+        {
+            Ok(status) if status.success() => {
+                debug_println!("screenshot via grim -> {:?}", image_file_path);
+                return;
+            }
+            Ok(status) => eprintln!(
+                "grim exited with {:?}, falling back to the screenshots crate",
+                status
+            ),
+            Err(e) => eprintln!(
+                "grim is unavailable ({:?}), falling back to the screenshots crate",
+                e
+            ),
+        }
+    }
     let image = match screen.capture() {
         Ok(img) => img,
         Err(e) => {

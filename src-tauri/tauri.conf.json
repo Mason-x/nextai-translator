@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/schema.json",
   "productName": "NextAI Translator",
-  "version": "0.1.0",
+  "version": "0.6.55",
   "identifier": "xyz.yetone.apps.openai-translator",
   "build": {
     "beforeDevCommand": "pnpm dev-tauri-renderer",
@@ -15,7 +15,7 @@
     },
     "updater": {
       "endpoints": [
-        "https://github.com/nextai-translator/nextai-translator/releases/latest/download/latest.json"
+        "https://github.com/Mason-x/nextai-translator/releases/latest/download/latest.json"
       ],
       "active": true,
       "windows": {
@@ -29,9 +29,7 @@
     "createUpdaterArtifacts": true,
     "linux": {
       "deb": {
-        "depends": [
-          "xdotool"
-        ]
+        "depends": []
       },
       "appimage": {
         "bundleMediaFramework": true

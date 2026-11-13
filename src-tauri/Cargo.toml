@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.0"
+version = "0.6.55"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -20,7 +20,10 @@ serde = { version = "1.0", features = [ "derive" ] }
 tauri = { version = "2.8.5", features = [ "macos-private-api", "protocol-asset", "tray-icon" ] }
 once_cell = "1.17.1"
 clipboard = "0.5.0"
-enigo = { version = "0.2.0", features = [ "xdo" ] }
+# `xdo` links against libxdo.so.3, which no longer exists in current distros
+# (xdotool 4.x ships libxdo.so.4). The pure-Rust x11rb backend drives X11
+# directly, so the app has no libxdo runtime dependency at all.
+enigo = { version = "0.2.0", default-features = false, features = [ "x11rb" ] }
 mouse_position = "0.1.3"
 rdev = "0.5.2"
 tauri-utils = { version = "2.7.0", features = [] }
@@ -75,6 +78,12 @@ xcb = "1.4.0"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61.3", features = [ "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_Foundation", "Graphics_Imaging", "Media_Ocr", "Foundation", "Foundation_Collections", "Globalization", "Storage", "Storage_Streams" ] }
+
+# get-selected-text 0.1.6 hardcodes enigo's `xdo` feature; Cargo unifies
+# features, so it would drag libxdo.so.3 back in. The patched copy in
+# vendor/ uses the x11rb backend like the rest of the app.
+[patch.crates-io]
+get-selected-text = { path = "vendor/get-selected-text" }
 
 [features]
 # by default Tauri runs in production mode

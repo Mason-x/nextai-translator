@@ -9,6 +9,7 @@ mod fetch;
 mod insertion;
 mod lang;
 mod ocr;
+mod selected_text;
 mod tray;
 mod tts;
 mod utils;
@@ -17,7 +18,6 @@ mod writing;
 
 use config::get_config;
 use debug_print::debug_println;
-use get_selected_text::get_selected_text;
 use insertion::{
     insert_translation_into_previous_input, remember_active_window, remember_active_window_command,
 };
@@ -301,7 +301,7 @@ fn bind_mouse_hook() {
                         }
 
                         let _lock = RELEASE_THREAD_ID.lock();
-                        let selected_text = get_selected_text().unwrap_or_default();
+                        let selected_text = crate::selected_text::get_selected_text();
                         if !selected_text.is_empty() {
                             {
                                 *SELECTED_TEXT.lock() = selected_text;
@@ -346,7 +346,71 @@ fn bind_mouse_hook() {
     }
 }
 
+/// `hyprctl getoption xwayland:force_zero_scaling -j` -> `Some(true)`.
+/// Returns `None` on any other compositor, so the caller stays a no-op there.
+#[cfg(target_os = "linux")]
+fn xwayland_force_zero_scaling() -> Option<bool> {
+    let output = std::process::Command::new("hyprctl")
+        .args(["getoption", "xwayland:force_zero_scaling", "-j"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .split("\"bool\":")
+        .nth(1)
+        .map(|rest| rest.trim_start().starts_with("true"))
+}
+
+/// WebKitGTK/GTK defaults for a Wayland session.
+///
+/// Two upstream assumptions break on Wayland:
+///
+/// * WebKitGTK's DMABUF renderer aborts with `Gdk-Message: Error 71 (protocol
+///   error)` on some drivers, and without it NVIDIA still only commits a single
+///   strip (or a 2x-zoomed buffer) to the surface. Going through XWayland is the
+///   combination that actually paints, and it is also what enigo's x11rb
+///   backend drives.
+/// * With `xwayland:force_zero_scaling` on, the compositor already presents a
+///   1:1 surface to X11 clients, so any inherited `GDK_SCALE` gets applied on
+///   top and every widget is painted at twice its size inside a normal-sized
+///   window. That is what makes the UI look zoomed when the session exports
+///   `GDK_SCALE=2` for a 1x monitor.
+///
+/// `NEXTAI_NATIVE_WAYLAND=1` keeps the app on native Wayland, and
+/// `NEXTAI_KEEP_GDK_SCALE=1` keeps whatever `GDK_SCALE` the session exported.
+#[cfg(target_os = "linux")]
+fn apply_linux_env_defaults() {
+    if env::var_os("NEXTAI_NATIVE_WAYLAND").is_some() {
+        return;
+    }
+
+    env::set_var("GDK_BACKEND", "x11");
+
+    if env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+
+    let inherited_scale = env::var("GDK_SCALE").ok();
+    if env::var_os("NEXTAI_KEEP_GDK_SCALE").is_none()
+        && inherited_scale.as_deref().is_some_and(|scale| scale != "1")
+        && xwayland_force_zero_scaling() == Some(true)
+    {
+        env::set_var("GDK_SCALE", "1");
+    }
+}
+
+/// Analytics are opt-in in this fork: upstream's Aptabase project key would
+/// otherwise collect our users' events into somebody else's dashboard.
+pub fn telemetry_enabled() -> bool {
+    env::var_os("NEXTAI_TELEMETRY").is_some()
+}
+
 fn main() {
+    // Must run before GTK initialises the display connection.
+    #[cfg(target_os = "linux")]
+    apply_linux_env_defaults();
+
     // Without a working WebView2 Runtime not a single window can be created,
     // so the app would only ever flash a frame and abort (discussion #1907).
     // Fail up front with an actionable dialog instead.
@@ -424,8 +488,10 @@ fn main() {
     let specta_builder_setup = specta_builder.clone();
 
     #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
-    let mut app = tauri::Builder::default()
-        .plugin(
+    let mut builder = tauri::Builder::default();
+
+    if telemetry_enabled() {
+        builder = builder.plugin(
             tauri_plugin_aptabase::Builder::new("A-US-9856842764")
                 .with_panic_hook(Box::new(|client, info, msg| {
                     let location = info
@@ -441,7 +507,11 @@ fn main() {
                     );
                 }))
                 .build(),
-        )
+        );
+    }
+
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+    let mut app = builder
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
@@ -589,11 +659,15 @@ fn main() {
 
     app.run(|app, event| match event {
         tauri::RunEvent::Exit { .. } => {
-            let _ = app.track_event("app_exited", None);
-            app.flush_events_blocking();
+            if telemetry_enabled() {
+                let _ = app.track_event("app_exited", None);
+                app.flush_events_blocking();
+            }
         }
         tauri::RunEvent::Ready => {
-            let _ = app.track_event("app_started", None);
+            if telemetry_enabled() {
+                let _ = app.track_event("app_started", None);
+            }
             bind_mouse_hook();
             let handle = app.clone();
             tauri::async_runtime::spawn(async move {

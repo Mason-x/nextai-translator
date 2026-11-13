@@ -1,0 +1,83 @@
+# Maintainer: Mason <mason@localhost>
+#
+# Builds the Wayland/dependency fixes from this fork instead of repackaging
+# upstream's prebuilt .deb. See ../../PATCHES.md for what changed and why.
+#
+#   makepkg -si
+#
+# The source build is cached by cargo/pnpm, but the first `makepkg` run compiles
+# ~500 crates plus the bundled sherpa-onnx/TTS runtime: expect 10-20 minutes on
+# a desktop CPU.
+
+pkgname=nextai-translator
+pkgver=0.6.55
+pkgrel=1
+pkgdesc="ChatGPT-based selection translator (fork: no libxdo, Wayland screenshot/selection/typing)"
+arch=('x86_64')
+url="https://github.com/Mason-x/nextai-translator"
+license=('AGPL-3.0-only')
+depends=(
+  # Tauri v2 webview stack
+  'gtk3'
+  'webkit2gtk-4.1'
+  'libayatana-appindicator'
+  # Wayland integration used by this fork (all optional at runtime, but the
+  # app is much less useful without them)
+  'wl-clipboard'
+  'grim'
+  'wtype'
+)
+makedepends=('git' 'rust' 'nodejs' 'pnpm' 'clang' 'pkgconf' 'libxcb')
+provides=('nextai-translator')
+conflicts=('nextai-translator-bin' 'openai-translator')
+
+source=("$pkgname::git+https://github.com/Mason-x/nextai-translator.git#branch=main")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname"
+  export npm_config_manage_package_manager_versions=false
+  pnpm install --frozen-lockfile
+  pnpm build-tauri-renderer
+}
+
+build() {
+  cd "$pkgname"
+  export CARGO_NET_GIT_FETCH_WITH_CLI=true
+  cargo build --release --manifest-path src-tauri/Cargo.toml --bin app
+}
+
+package() {
+  cd "$pkgname"
+
+  install -Dm755 src-tauri/target/release/app "$pkgdir/usr/bin/nextai-translator"
+
+  # Tauri resolves BaseDirectory::Resource as ../../lib/<productName>, so the
+  # product name (with its space) has to stay exactly as configured.
+  install -dm755 "$pkgdir/usr/lib/NextAI Translator/resources"
+  for f in src-tauri/resources/*; do
+    install -Dm644 "$f" "$pkgdir/usr/lib/NextAI Translator/resources/$(basename "$f")"
+  done
+
+  local icon_pairs=("32x32:32x32" "128x128:128x128" "128x128@2:128x128@2x")
+  for pair in "${icon_pairs[@]}"; do
+    local dir=${pair%%:*} file=${pair##*:}
+    install -Dm644 "src-tauri/icons/$file.png" \
+      "$pkgdir/usr/share/icons/hicolor/$dir/apps/nextai-translator.png"
+  done
+
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/nextai-translator.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=NextAI Translator
+Name[zh_CN]=NextAI 划词翻译
+Comment=Translation and OCR based on LLM APIs
+Comment[zh_CN]=基于 LLM API 的划词翻译与截图 OCR
+Exec=nextai-translator
+Icon=nextai-translator
+Terminal=false
+Categories=Utility;Translation;
+Keywords=translate;translation;ocr;llm;
+StartupWMClass=Nextai-translator
+EOF
+}
