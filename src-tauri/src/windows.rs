@@ -257,6 +257,25 @@ pub fn close_thumb() {
 
 pub fn show_thumb(x: i32, y: i32) {
     let window = get_thumb_window(x, y);
+    // Under XWayland/GTK the 20x20 clamp in the builder is not honoured: the
+    // webview negotiates its own size and the icon opens as a 200x200 square.
+    // Pin the size request at the GTK level, which is what actually decides.
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::prelude::*;
+        let _ = window.with_webview(|platform| {
+            let webview = platform.inner();
+            webview.set_size_request(20, 20);
+            if let Some(toplevel) = webview.toplevel() {
+                if let Ok(window) = toplevel.downcast::<gtk::Window>() {
+                    window.set_resizable(false);
+                    window.set_size_request(20, 20);
+                    window.resize(20, 20);
+                }
+            }
+        });
+        let _ = window.set_position(tauri::PhysicalPosition::new(x + 7, y + 7));
+    }
     window.show().unwrap();
     nudge_webview_visibility(&window);
 }

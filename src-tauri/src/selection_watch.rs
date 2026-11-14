@@ -15,9 +15,9 @@
 //! * `translate` — translate immediately, no icon, no hotkey
 //! * `off`       — do nothing
 //!
-//! Default when no config exists: `icon` if the "always show icons" setting is
-//! on (upstream behaviour), otherwise `translate` — if the user turned the icon
-//! off, they still expect the selection to do something.
+//! Default: `icon`. Selecting text never fires a request by itself; the icon is
+//! what turns a selection into a translation. `translate` is available for
+//! anyone who wants selection to translate immediately.
 //!
 //! Optional override file, `selection.json` next to `config.json`:
 //!
@@ -87,16 +87,9 @@ fn action(config: &SelectionConfig) -> Action {
     if let Some(value) = config.action.as_deref().and_then(parse_action) {
         return value;
     }
-    // No explicit setting: mirror the "always show icons" preference.
-    let always_show_icons = crate::config::get_config()
-        .ok()
-        .and_then(|c| c.always_show_icons)
-        .unwrap_or(true);
-    if always_show_icons {
-        Action::Icon
-    } else {
-        Action::Translate
-    }
+    // Fork default: show the icon, translate only when it is clicked. Selecting
+    // text must never spend an API request on its own.
+    Action::Icon
 }
 
 fn parse_action(value: &str) -> Option<Action> {

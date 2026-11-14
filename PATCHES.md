@@ -106,18 +106,20 @@ This fork adds:
   `alwaysShowIcons` setting; `NEXTAI_NO_AUTO_ICON=1` and `NEXTAI_ICON_ALWAYS=1`
   exist for debugging).
 * `src-tauri/src/selection_watch.rs` — polls the PRIMARY selection and applies
-  one of three actions: `icon` (upstream UX), `translate` (translate right away,
-  no icon and no hotkey) or `off`. Default: `icon` when the "always show icons"
-  setting is on, otherwise `translate` — turning the icon off in the UI
-  otherwise left the selection doing nothing at all on Linux. Override with
-  `selection.json` next to `config.json`:
+  one of three actions: `icon` (default: show the icon next to the cursor,
+  translate when it is clicked — selecting text never spends a request by
+  itself), `translate` (translate right away, no icon and no hotkey) or `off`.
+  Override with `selection.json` next to `config.json`:
 
   ```json
   { "action": "translate", "minChars": 2, "settleMs": 350 }
   ```
 
   `NEXTAI_SELECTION_DEBUG=1` traces every decision, `NEXTAI_SELECTION_ALWAYS=1`
-  ignores the "own window has focus" guard.
+  ignores the "own window has focus" guard. The icon hides itself after 8s
+  without a click.
+* `show_thumb` pins the icon window at 20x20 through GTK: the builder's size
+  clamp is ignored under XWayland and the icon opened as a 200x200 square.
 
 * `clip-extensions/linux/nextai-translator.sh` — the Linux port of the official
   PopClip/SnipDo extensions, which only ever needed
