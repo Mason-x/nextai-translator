@@ -88,7 +88,28 @@ stderr and paints what the DOM received into a corner overlay;
 `NEXTAI_SCROLL_SELFTEST=1` additionally dispatches synthetic wheel events to
 prove the fallback engages.
 
-### 7. Fork hygiene
+### 7. Wayland entry points for "select and translate"
+
+Upstream's selection flow has two Linux-hostile pieces: the icon is surfaced by a
+`/dev/input` mouse hook that is skipped on Linux (so selecting text never showed
+it), and clicking that icon is detected inside the same hook (so the icon would
+have been inert anyway).
+
+This fork adds:
+
+* `nextai-translator --translate-selection` — grabs the PRIMARY selection and
+  opens the translator with it, honouring the single-instance plugin so it works
+  whether the app is running or not. Bind it in the compositor.
+* `src/tauri/windows/ThumbWindow.tsx` gets a real click handler
+  (`thumb_clicked`), and `watch_primary_selection_for_icon()` polls the PRIMARY
+  selection on Hyprland to show the icon (respects the existing
+  `alwaysShowIcons` setting; `NEXTAI_NO_AUTO_ICON=1` and `NEXTAI_ICON_ALWAYS=1`
+  exist for debugging).
+* `clip-extensions/linux/nextai-translator.sh` — the Linux port of the official
+  PopClip/SnipDo extensions, which only ever needed
+  `curl -d "$TEXT" --unix-socket /tmp/openai-translator.sock http://nextai-translator`.
+
+### 8. Fork hygiene
 
 * Updater endpoint points at this fork instead of upstream, so an official
   update can never overwrite these patches.

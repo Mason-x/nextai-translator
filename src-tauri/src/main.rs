@@ -47,7 +47,7 @@ use crate::windows::{
     hide_writing_indicator, recover_webview_visibility, show_action_manager_window,
     show_history_window, show_inline_lookup_window_command, show_quick_translator_window_command,
     show_translator_window_command, show_translator_window_with_selected_text_command,
-    show_updater_window, show_writing_indicator, TRANSLATOR_WIN_NAME,
+    show_updater_window, show_writing_indicator, thumb_clicked, TRANSLATOR_WIN_NAME,
 };
 use crate::writing::{finish_writing, write_to_input, writing_command};
 
@@ -71,6 +71,7 @@ pub static PREVIOUS_PRESS_TIME: Mutex<u128> = Mutex::new(0);
 pub static PREVIOUS_RELEASE_TIME: Mutex<u128> = Mutex::new(0);
 pub static PREVIOUS_RELEASE_POSITION: Mutex<(i32, i32)> = Mutex::new((0, 0));
 pub static RELEASE_THREAD_ID: Mutex<u32> = Mutex::new(0);
+pub static THUMB_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -159,6 +160,121 @@ fn launch_ipc_server(server: &Server) {
         let response = HttpResponse::from_string("ok");
         req.respond(response).unwrap();
     }
+}
+
+fn translate_current_selection() {
+    let text = crate::selected_text::get_selected_text();
+    if text.trim().is_empty() {
+        eprintln!("[translate-selection] nothing selected");
+        return;
+    }
+    *SELECTED_TEXT.lock() = text.clone();
+    windows::show_translator_with_text(text);
+}
+
+fn wants_translate_selection<I: IntoIterator<Item = String>>(args: I) -> bool {
+    args.into_iter()
+        .any(|arg| arg == "--translate-selection" || arg == "translate-selection")
+}
+
+/// Cursor position as reported by the compositor, used to place the icon.
+#[cfg(target_os = "linux")]
+fn cursor_position() -> Option<(i32, i32)> {
+    let output = std::process::Command::new("hyprctl")
+        .args(["cursorpos"])
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let (x, y) = stdout.trim().split_once(',')?;
+    Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+}
+
+/// True when the focused window belongs to this app, so the icon does not pop
+/// up over our own UI.
+#[cfg(target_os = "linux")]
+fn active_window_is_ours() -> bool {
+    let output = match std::process::Command::new("hyprctl")
+        .args(["activewindow", "-j"])
+        .output()
+    {
+        Ok(output) => output,
+        Err(_) => return false,
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout.contains("\"class\": \"Nextai-translator\"") || stdout.contains("\"class\": \"nextai-translator\"")
+}
+
+/// Upstream only shows the selection icon from a raw /dev/input mouse hook, and
+/// it skips that entirely on Linux ("mouse event hook skipped in linux!"), so
+/// selecting text never surfaced the icon here. Poll the Wayland PRIMARY
+/// selection instead: whenever it changes, drop the icon next to the cursor.
+/// `NEXTAI_NO_AUTO_ICON=1` disables it.
+#[cfg(target_os = "linux")]
+fn watch_primary_selection_for_icon() {
+    use std::time::Duration;
+
+    if env::var_os("NEXTAI_NO_AUTO_ICON").is_some() {
+        return;
+    }
+    if env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
+        return;
+    }
+
+    std::thread::spawn(|| {
+        let mut last = String::new();
+        let mut generation: u64 = 0;
+        loop {
+            std::thread::sleep(Duration::from_millis(600));
+
+            let always_show_icons = config::get_config()
+                .ok()
+                .and_then(|c| c.always_show_icons)
+                .unwrap_or(true);
+            if !always_show_icons {
+                continue;
+            }
+
+            let text = match crate::selected_text::primary_selection() {
+                Some(text) => text,
+                None => continue,
+            };
+            if text == last || text.trim().is_empty() {
+                last = text;
+                continue;
+            }
+            last = text.clone();
+
+            // Text selected inside our own window must not spawn the icon.
+            // NEXTAI_ICON_ALWAYS=1 skips that check for debugging.
+            if env::var_os("NEXTAI_ICON_ALWAYS").is_none() && active_window_is_ours() {
+                continue;
+            }
+            // Let the selection settle before measuring the cursor.
+            std::thread::sleep(Duration::from_millis(200));
+
+            let (x, y) = match cursor_position() {
+                Some(position) => position,
+                None => continue,
+            };
+
+            *SELECTED_TEXT.lock() = text;
+            windows::show_thumb(x, y);
+
+            generation += 1;
+            let this_generation = generation;
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(8));
+                if THUMB_GENERATION.load(Ordering::Acquire) == this_generation {
+                    if let Some(handle) = APP_HANDLE.get() {
+                        if let Some(window) = handle.get_webview_window(windows::THUMB_WIN_NAME) {
+                            let _ = window.hide();
+                        }
+                    }
+                }
+            });
+            THUMB_GENERATION.store(this_generation, Ordering::Release);
+        }
+    });
 }
 
 fn bind_mouse_hook() {
@@ -438,6 +554,7 @@ fn main() {
             clear_config_cache,
             show_translator_window_command,
             show_translator_window_with_selected_text_command,
+            thumb_clicked,
             show_action_manager_window,
             show_history_window,
             show_updater_window,
@@ -519,6 +636,10 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             println!("{}, {argv:?}, {cwd}", app.package_info().name);
+            if wants_translate_selection(argv.iter().skip(1).cloned()) {
+                translate_current_selection();
+                return;
+            }
             app.notification()
                 .builder()
                 .title("This app is already running!")
@@ -670,6 +791,14 @@ fn main() {
                 let _ = app.track_event("app_started", None);
             }
             bind_mouse_hook();
+            #[cfg(target_os = "linux")]
+            watch_primary_selection_for_icon();
+            if wants_translate_selection(env::args()) {
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                    translate_current_selection();
+                });
+            }
             let handle = app.clone();
             tauri::async_runtime::spawn(async move {
                 let builder = handle.updater_builder();

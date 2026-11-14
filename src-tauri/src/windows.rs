@@ -120,6 +120,43 @@ pub fn get_translator_window_always_on_top() -> bool {
     ALWAYS_ON_TOP.load(Ordering::Acquire)
 }
 
+/// Shows the translator window pre-filled with `text` and starts translating.
+/// Shared by the unix-socket/browser-extension entry point, the
+/// `--translate-selection` flag and a click on the selection icon.
+pub fn show_translator_with_text(text: String) {
+    if text.trim().is_empty() {
+        return;
+    }
+    let use_compact = config::get_config()
+        .ok()
+        .and_then(|c| c.use_compact_lookup)
+        .unwrap_or(false);
+    if use_compact {
+        let window = show_inline_lookup_window(false, true, false);
+        crate::utils::send_text(text);
+        let _ = window.set_focus();
+    } else {
+        crate::utils::send_text(text);
+        crate::insertion::remember_active_window();
+        let window = show_translator_window(false, true, false);
+        let _ = window.set_focus();
+        crate::utils::show();
+    }
+}
+
+/// Clicking the selection icon: hide it, then translate what was selected.
+#[tauri::command]
+#[specta::specta]
+pub fn thumb_clicked() {
+    if let Some(handle) = crate::APP_HANDLE.get() {
+        if let Some(window) = handle.get_webview_window(THUMB_WIN_NAME) {
+            let _ = window.hide();
+        }
+    }
+    let text = (*crate::SELECTED_TEXT.lock()).clone();
+    show_translator_with_text(text);
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn show_translator_window_with_selected_text_command() {

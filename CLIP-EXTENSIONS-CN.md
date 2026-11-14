@@ -61,3 +61,31 @@
         <img width="600" src="https://user-images.githubusercontent.com/1206493/240358161-2788eb97-d00b-4808-aa86-a7fcfe3f71dd.gif" />
     </p>
 
+# Linux
+
+Linux 上目前没有 PopClip / SnipDo 那样的通用划词软件，但它们的插件本质上只是把选中文本通过 IPC socket 交给桌面端：
+
+```sh
+curl -d "$TEXT" --unix-socket /tmp/openai-translator.sock http://nextai-translator
+```
+
+这个 socket 在 Linux 版上同样存在，所以 `clip-extensions/linux/nextai-translator.sh` 补上了唯一缺的部分——读取选区：
+
+* 1. 安装：`install -Dm755 clip-extensions/linux/nextai-translator.sh ~/.local/bin/nextai-translate-selection`
+* 2. 在合成器里绑一个键（Hyprland 示例，写进 `~/.config/hypr/bindings.lua`）：
+
+```lua
+o.bind("ALT + T", "Translate selection", "nextai-translate-selection")
+```
+
+* 3. 选中文本 → 按快捷键 → 翻译窗口弹出。app 没在运行时脚本会自己拉起它
+
+脚本优先读 Wayland 的 PRIMARY selection（`wl-paste --primary`），失败才回退 X11 的 `xclip`。
+
+如果不想依赖 curl / 脚本，桌面端也内置了同样的能力：
+
+```sh
+nextai-translator --translate-selection
+```
+
+它直接取 PRIMARY selection 并打开翻译窗口，同样适合直接绑到快捷键上。
