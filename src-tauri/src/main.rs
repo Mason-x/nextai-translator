@@ -11,6 +11,7 @@ mod lang;
 mod ocr;
 mod scroll_debug;
 mod selected_text;
+mod selection_watch;
 mod tray;
 mod tts;
 mod utils;
@@ -71,7 +72,6 @@ pub static PREVIOUS_PRESS_TIME: Mutex<u128> = Mutex::new(0);
 pub static PREVIOUS_RELEASE_TIME: Mutex<u128> = Mutex::new(0);
 pub static PREVIOUS_RELEASE_POSITION: Mutex<(i32, i32)> = Mutex::new((0, 0));
 pub static RELEASE_THREAD_ID: Mutex<u32> = Mutex::new(0);
-pub static THUMB_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -175,106 +175,6 @@ fn translate_current_selection() {
 fn wants_translate_selection<I: IntoIterator<Item = String>>(args: I) -> bool {
     args.into_iter()
         .any(|arg| arg == "--translate-selection" || arg == "translate-selection")
-}
-
-/// Cursor position as reported by the compositor, used to place the icon.
-#[cfg(target_os = "linux")]
-fn cursor_position() -> Option<(i32, i32)> {
-    let output = std::process::Command::new("hyprctl")
-        .args(["cursorpos"])
-        .output()
-        .ok()?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let (x, y) = stdout.trim().split_once(',')?;
-    Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
-}
-
-/// True when the focused window belongs to this app, so the icon does not pop
-/// up over our own UI.
-#[cfg(target_os = "linux")]
-fn active_window_is_ours() -> bool {
-    let output = match std::process::Command::new("hyprctl")
-        .args(["activewindow", "-j"])
-        .output()
-    {
-        Ok(output) => output,
-        Err(_) => return false,
-    };
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    stdout.contains("\"class\": \"Nextai-translator\"") || stdout.contains("\"class\": \"nextai-translator\"")
-}
-
-/// Upstream only shows the selection icon from a raw /dev/input mouse hook, and
-/// it skips that entirely on Linux ("mouse event hook skipped in linux!"), so
-/// selecting text never surfaced the icon here. Poll the Wayland PRIMARY
-/// selection instead: whenever it changes, drop the icon next to the cursor.
-/// `NEXTAI_NO_AUTO_ICON=1` disables it.
-#[cfg(target_os = "linux")]
-fn watch_primary_selection_for_icon() {
-    use std::time::Duration;
-
-    if env::var_os("NEXTAI_NO_AUTO_ICON").is_some() {
-        return;
-    }
-    if env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
-        return;
-    }
-
-    std::thread::spawn(|| {
-        let mut last = String::new();
-        let mut generation: u64 = 0;
-        loop {
-            std::thread::sleep(Duration::from_millis(600));
-
-            let always_show_icons = config::get_config()
-                .ok()
-                .and_then(|c| c.always_show_icons)
-                .unwrap_or(true);
-            if !always_show_icons {
-                continue;
-            }
-
-            let text = match crate::selected_text::primary_selection() {
-                Some(text) => text,
-                None => continue,
-            };
-            if text == last || text.trim().is_empty() {
-                last = text;
-                continue;
-            }
-            last = text.clone();
-
-            // Text selected inside our own window must not spawn the icon.
-            // NEXTAI_ICON_ALWAYS=1 skips that check for debugging.
-            if env::var_os("NEXTAI_ICON_ALWAYS").is_none() && active_window_is_ours() {
-                continue;
-            }
-            // Let the selection settle before measuring the cursor.
-            std::thread::sleep(Duration::from_millis(200));
-
-            let (x, y) = match cursor_position() {
-                Some(position) => position,
-                None => continue,
-            };
-
-            *SELECTED_TEXT.lock() = text;
-            windows::show_thumb(x, y);
-
-            generation += 1;
-            let this_generation = generation;
-            std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_secs(8));
-                if THUMB_GENERATION.load(Ordering::Acquire) == this_generation {
-                    if let Some(handle) = APP_HANDLE.get() {
-                        if let Some(window) = handle.get_webview_window(windows::THUMB_WIN_NAME) {
-                            let _ = window.hide();
-                        }
-                    }
-                }
-            });
-            THUMB_GENERATION.store(this_generation, Ordering::Release);
-        }
-    });
 }
 
 fn bind_mouse_hook() {
@@ -792,7 +692,7 @@ fn main() {
             }
             bind_mouse_hook();
             #[cfg(target_os = "linux")]
-            watch_primary_selection_for_icon();
+            selection_watch::start();
             if wants_translate_selection(env::args()) {
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(400)).await;

@@ -105,6 +105,20 @@ This fork adds:
   selection on Hyprland to show the icon (respects the existing
   `alwaysShowIcons` setting; `NEXTAI_NO_AUTO_ICON=1` and `NEXTAI_ICON_ALWAYS=1`
   exist for debugging).
+* `src-tauri/src/selection_watch.rs` — polls the PRIMARY selection and applies
+  one of three actions: `icon` (upstream UX), `translate` (translate right away,
+  no icon and no hotkey) or `off`. Default: `icon` when the "always show icons"
+  setting is on, otherwise `translate` — turning the icon off in the UI
+  otherwise left the selection doing nothing at all on Linux. Override with
+  `selection.json` next to `config.json`:
+
+  ```json
+  { "action": "translate", "minChars": 2, "settleMs": 350 }
+  ```
+
+  `NEXTAI_SELECTION_DEBUG=1` traces every decision, `NEXTAI_SELECTION_ALWAYS=1`
+  ignores the "own window has focus" guard.
+
 * `clip-extensions/linux/nextai-translator.sh` — the Linux port of the official
   PopClip/SnipDo extensions, which only ever needed
   `curl -d "$TEXT" --unix-socket /tmp/openai-translator.sock http://nextai-translator`.

@@ -37,6 +37,7 @@ pub fn primary_selection() -> Option<String> {
     }
 
     for mime in PRIMARY_TYPES {
+        let debug = std::env::var_os("NEXTAI_SELECTION_DEBUG").is_some();
         let output = match Command::new("wl-paste")
             .args(["--primary", "--no-newline", "--type", mime])
             .stdin(Stdio::null())
@@ -48,7 +49,20 @@ pub fn primary_selection() -> Option<String> {
             Err(_) => return None,
         };
         if !output.status.success() {
+            if debug {
+                eprintln!(
+                    "[selected_text] wl-paste {mime} failed: {:?} {}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+            }
             continue;
+        }
+        if debug {
+            eprintln!(
+                "[selected_text] wl-paste {mime} ok: {} bytes",
+                output.stdout.len()
+            );
         }
         let text = String::from_utf8_lossy(&output.stdout).into_owned();
         if !text.trim().is_empty() {

@@ -135,13 +135,24 @@ pub fn show_translator_with_text(text: String) {
         let window = show_inline_lookup_window(false, true, false);
         crate::utils::send_text(text);
         let _ = window.set_focus();
-    } else {
-        crate::utils::send_text(text);
-        crate::insertion::remember_active_window();
-        let window = show_translator_window(false, true, false);
-        let _ = window.set_focus();
-        crate::utils::show();
+        return;
     }
+
+    // Show first: if this call has to create the webview, its `change-text`
+    // listener only exists once the frontend has mounted, and an event emitted
+    // before that is dropped (the window then opens with an empty box).
+    crate::insertion::remember_active_window();
+    let window = show_translator_window(false, true, true);
+    crate::utils::show();
+    focus_translator_window(&window);
+
+    crate::utils::send_text(text.clone());
+    // Re-deliver once the view is up; setting the same text again is a no-op in
+    // the frontend, so this cannot double-translate.
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        crate::utils::send_text(text);
+    });
 }
 
 /// Clicking the selection icon: hide it, then translate what was selected.
