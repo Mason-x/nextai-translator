@@ -116,8 +116,17 @@ This fork adds:
   ```
 
   `NEXTAI_SELECTION_DEBUG=1` traces every decision, `NEXTAI_SELECTION_ALWAYS=1`
-  ignores the "own window has focus" guard. The icon hides itself after 8s
-  without a click.
+  ignores the "own window has focus" guard, `NEXTAI_ICON_OFFSET` moves the icon
+  relative to the cursor (default `7`).
+
+  Dismissing the icon: there is no input hook, so the icon is dropped as soon as
+  any observable sign of "the selection is over" appears — the PRIMARY selection
+  becoming empty, the focused window changing, the pointer moving more than
+  `moveAwayPx` (default 60) away from where the selection was made, or 8 seconds
+  passing. Showing the icon must not steal focus: the user is often still typing
+  or extending the selection, so focus is handed straight back (GTK's
+  `focus_on_map`/`accept_focus` hints are not enough under XWayland, and
+  `accept_focus = false` also swallowed the icon's own clicks).
 * `show_thumb` pins the icon window at 20x20 through GTK: the builder's size
   clamp is ignored under XWayland and the icon opened as a 200x200 square.
 

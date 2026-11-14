@@ -159,11 +159,10 @@ pub fn show_translator_with_text(text: String) {
 #[tauri::command]
 #[specta::specta]
 pub fn thumb_clicked() {
-    if let Some(handle) = crate::APP_HANDLE.get() {
-        if let Some(window) = handle.get_webview_window(THUMB_WIN_NAME) {
-            let _ = window.hide();
-        }
+    if std::env::var_os("NEXTAI_SELECTION_DEBUG").is_some() {
+        eprintln!("[thumb] icon clicked");
     }
+    hide_thumb();
     let text = (*crate::SELECTED_TEXT.lock()).clone();
     show_translator_with_text(text);
 }
@@ -255,6 +254,16 @@ pub fn close_thumb() {
     }
 }
 
+/// Hides the selection icon if it exists. Used to dismiss it as soon as the
+/// selection it belongs to is gone (see `selection_watch`).
+pub fn hide_thumb() {
+    if let Some(handle) = APP_HANDLE.get() {
+        if let Some(window) = handle.get_webview_window(THUMB_WIN_NAME) {
+            let _ = window.hide();
+        }
+    }
+}
+
 pub fn show_thumb(x: i32, y: i32) {
     let window = get_thumb_window(x, y);
     // Under XWayland/GTK the 20x20 clamp in the builder is not honoured: the
@@ -271,10 +280,23 @@ pub fn show_thumb(x: i32, y: i32) {
                     window.set_resizable(false);
                     window.set_size_request(20, 20);
                     window.resize(20, 20);
+                    // Do not take focus when mapped: while the icon is shown the
+                    // user is usually still typing or adjusting the selection,
+                    // and a focus steal swallows those keys. `accept_focus` must
+                    // stay enabled, otherwise the window also stops receiving
+                    // clicks and the icon becomes inert.
+                    window.set_focus_on_map(false);
                 }
             }
         });
-        let _ = window.set_position(tauri::PhysicalPosition::new(x + 7, y + 7));
+        // Offset of the icon relative to the selection point. Negative values
+        // centre it on the cursor, which is handy on setups where the default
+        // 7px offset puts it under the pointer's own decoration.
+        let offset: i32 = std::env::var("NEXTAI_ICON_OFFSET")
+            .ok()
+            .and_then(|value| value.trim().parse().ok())
+            .unwrap_or(7);
+        let _ = window.set_position(tauri::PhysicalPosition::new(x + offset, y + offset));
     }
     window.show().unwrap();
     nudge_webview_visibility(&window);
